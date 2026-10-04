@@ -118,66 +118,69 @@ def main():
 
     best = {}
 
-    cache = load_cache() if a.check else None
-    ttl = timedelta(days=30 * 12)
-    purged_count = purge_cache(cache, ttl)
-    if purged_count > 0:
-        print(
-            f"Purged {purged_count} from the cache: either invalid (missing fields) or older than {ttl}"
-        )
-    save_cache(cache)
-    checked = set()
-    free_acronyms = set()
+    if not a.check:
+        batch_size = 1024
 
-    batch_size = 32 if a.check else 1024
-
-    try:
         while True:
             batch = generator_next(batch_size)
 
             if not batch:
                 break
 
-            if not a.check:
-                for row in batch:
-                    add_best(best, row)
-
-                continue
-
-            checks = 0
-
             for row in batch:
-                _syl, _extra, _cost, acr, _selections = row
+                add_best(best, row)
 
-                if acr in checked:
-                    if acr in free_acronyms:
-                        add_best(best, row)
-                    continue
+    else:
+        batch_size = 32
+        cache = load_cache()
+        ttl = timedelta(days=30 * 12)
+        purged_count = purge_cache(cache, ttl)
+        if purged_count > 0:
+            print(
+                f"Purged {purged_count} from the cache: either invalid (missing fields) or older than {ttl}"
+            )
+        save_cache(cache)
+        checked = set()
+        free_acronyms = set()
 
-                checked.add(acr)
+        try:
+            while True:
+                batch = generator_next(batch_size)
 
-                try:
+                if not batch:
+                    break
+
+                checks = 0
+
+                for row in batch:
+                    _syl, _extra, _cost, acr, _selections = row
+
+                    if acr in checked:
+                        if acr in free_acronyms:
+                            add_best(best, row)
+                        continue
+
+                    checked.add(acr)
+
                     gh, py, performed_check = check_free(acr, cache)
-                except KeyboardInterrupt:
-                    save_cache(cache)
-                    raise
 
-                if performed_check:
-                    checks += 1
+                    if performed_check:
+                        checks += 1
 
-                if gh == "free" and py == "free":
-                    free_acronyms.add(acr)
-                    add_best(best, row)
+                    if gh == "free" and py == "free":
+                        free_acronyms.add(acr)
+                        add_best(best, row)
 
+                save_cache(cache)
+
+                if checks:
+                    print(
+                        f"{checks} check{'s' if checks > 1 else ''} down, cache saved"
+                    )
+
+        except KeyboardInterrupt:
             save_cache(cache)
-
-            if checks:
-                print(f"{checks} check{'s' if checks > 1 else ''} down, cache saved")
-
-    except KeyboardInterrupt:
-        if a.check:
-            save_cache(cache)
-        raise
+            raise
 
     rows = sorted(best.values())[: a.top]
 
