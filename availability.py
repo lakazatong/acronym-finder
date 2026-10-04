@@ -12,12 +12,19 @@ import urllib.request
 #
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
-# Don't hammer GitHub if it tells us we're rate-limited.
-github_pause_until = 0.0
+# GitHub's primary REST API budget.
+#
+# Unauthenticated:
+#   60 requests / hour
+#
+# Authenticated with a PAT:
+#   5,000 requests / hour
+#
+# Keep a small safety margin so clock/network overhead does not
+# accumulate enough to push us over the nominal hourly budget.
+GITHUB_REQUESTS_PER_HOUR = 5000 if GITHUB_TOKEN else 60
+GITHUB_REQUEST_INTERVAL = (3600 / GITHUB_REQUESTS_PER_HOUR) - 0.01
 
-# Minimum spacing between GitHub requests.
-# This is deliberately conservative; the actual delay is adjusted
-# using the rate-limit headers returned by GitHub.
 github_next_request_at = 0.0
 
 # If GitHub gives us a secondary-rate-limit response without
@@ -45,53 +52,15 @@ def github_headers():
 
 def github_wait_before_request():
     delay = github_next_request_at - time.time()
+
     if delay > 0:
-        if delay > 10:
-            print(
-                f"Sleeping for {delay} seconds because of github rate limiting\n"
-                + "You can safely CTRL+C, cache will be saved before aborting\n"
-                + "If you so wish to reduce that cooldown, set the GITHUB_TOKEN env variable with your PAT"
-            )
         time.sleep(delay)
 
 
-def update_github_rate_limit(headers):
-    """
-    Update the delay before the next GitHub request based on the
-    rate-limit headers returned by GitHub.
-
-    We don't try to hit the limit exactly. We leave a small amount
-    of headroom and spread the remaining requests across the
-    remaining time window.
-    """
+def github_mark_request():
     global github_next_request_at
 
-    try:
-        remaining = int(headers.get("X-RateLimit-Remaining", ""))
-        # limit = int(headers.get("X-RateLimit-Limit", ""))
-        reset = int(headers.get("X-RateLimit-Reset", ""))
-    except ValueError:
-        return
-
-    if remaining <= 0:
-        return
-
-    seconds_until_reset = max(1, reset - int(time.time()))
-
-    # Spread the remaining requests over the remaining window.
-    # Leave one request in reserve.
-    requests_left = max(1, remaining - 1)
-
-    interval = seconds_until_reset / requests_left
-
-    # Never go faster than 100 ms between requests.
-    # This also helps avoid secondary rate limits.
-    interval = max(0.10, interval)
-
-    github_next_request_at = max(
-        github_next_request_at,
-        time.time() + interval,
-    )
+    github_next_request_at = time.time() + GITHUB_REQUEST_INTERVAL
 
 
 def github_rate_limit_delay(error):
@@ -103,7 +72,6 @@ def github_rate_limit_delay(error):
     """
     headers = error.headers
 
-    # Secondary rate limits may explicitly tell us how long to wait.
     retry_after = headers.get("Retry-After")
 
     if retry_after:
@@ -112,7 +80,6 @@ def github_rate_limit_delay(error):
         except ValueError:
             pass
 
-    # Primary rate limit: wait until X-RateLimit-Reset.
     remaining = headers.get("X-RateLimit-Remaining")
     reset = headers.get("X-RateLimit-Reset")
 
@@ -132,11 +99,6 @@ def check_github(name):
         False -> GitHub user does not exist / free
         None  -> couldn't determine
     """
-    global github_pause_until
-
-    if time.time() < github_pause_until:
-        return None
-
     github_wait_before_request()
 
     url = f"https://api.github.com/users/{name}"
@@ -147,13 +109,14 @@ def check_github(name):
             headers=github_headers(),
         )
 
-        with urllib.request.urlopen(req, timeout=8) as response:
-            update_github_rate_limit(response.headers)
+        with urllib.request.urlopen(req, timeout=8):
+            github_mark_request()
             return True
 
     except urllib.error.HTTPError as e:
-        # Always process rate-limit headers when GitHub gives us them.
-        update_github_rate_limit(e.headers)
+        # The request was sent, so keep the normal pacing regardless
+        # of whether GitHub returned a successful response or an error.
+        github_mark_request()
 
         # 404 is the one response that means "this username doesn't exist".
         if e.code == 404:
@@ -167,27 +130,33 @@ def check_github(name):
             )
             return None
 
+        # Primary or secondary rate limit.
         if e.code in (403, 429):
             delay = github_rate_limit_delay(e)
 
             if delay is None:
                 delay = SECONDARY_LIMIT_WAIT
 
-            github_pause_until = time.time() + delay
+            # Do not sleep here. The next request will honor the
+            # server-provided delay if we need to retry.
+            global github_next_request_at
+            github_next_request_at = max(
+                github_next_request_at,
+                time.time() + delay,
+            )
 
             print(
-                f"GitHub rate limited; skipping GitHub checks for this run "
-                f"(retry in {delay}s).",
+                f"GitHub rate limited; waiting {delay}s before the next "
+                f"GitHub request.",
                 file=sys.stderr,
             )
 
-            # IMPORTANT:
-            # Do not sleep here. A reset could be 50+ minutes away.
             return None
 
         return None
 
     except (urllib.error.URLError, TimeoutError):
+        github_mark_request()
         return None
 
 
@@ -233,7 +202,10 @@ def check_free(name, cache):
         },
     )
 
+    performed_check = False
+
     if data["github"] is None:
+        performed_check = True
         result = check_github(name)
 
         if result is not None:
@@ -241,6 +213,7 @@ def check_free(name, cache):
             data["github_checked_at"] = utc_now()
 
     if data["pypi"] is None:
+        performed_check = True
         result = check_pypi(name)
 
         if result is not None:
@@ -250,4 +223,4 @@ def check_free(name, cache):
     def fmt(value):
         return "?" if value is None else ("taken" if value else "free")
 
-    return fmt(data["github"]), fmt(data["pypi"])
+    return fmt(data["github"]), fmt(data["pypi"]), performed_check

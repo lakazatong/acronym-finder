@@ -9,9 +9,9 @@ look pronounceable, and ranks them by:
 Words are positional arguments. Each word can optionally carry a maximum
 number of letters it may contribute, as word:N.
 
-Every word contributes at least one letter. If N is omitted, its maximum is
-determined by --min-len and --max-len. If neither is provided, both default
-to the number of words, so every word contributes exactly one letter.
+Every word contributes at least one letter. If N is omitted, its maximum
+is determined by --min-len and --max-len. If neither is provided, both
+default to the number of words, so every word contributes exactly one letter.
 
 For k words:
   --min-len L implies N <= L - k + 1
@@ -109,82 +109,79 @@ def main():
     if a.min_len is not None and a.max_len is not None and a.max_len <= a.min_len:
         ap.error("--max-len must be strictly greater than --min-len")
 
-    # The generator owns only search-space traversal.  The CLI owns ranking:
-    # we consume the whole search space and retain the best rows seen.
     generator_init(
         a.words,
         min_len=a.min_len,
         max_len=a.max_len,
     )
 
-    if not a.check:
-        best = {}
-        batch_size = 1024
+    best = {}
 
+    cache = load_cache() if a.check else None
+    checked = set()
+    free_acronyms = set()
+
+    batch_size = 32 if a.check else 1024
+
+    try:
         while True:
             batch = generator_next(batch_size)
 
             if not batch:
                 break
 
-            for row in batch:
-                add_best(best, row)
+            if not a.check:
+                for row in batch:
+                    add_best(best, row)
 
-            print(f"One batch of {batch_size} down")
+                continue
 
-        rows = sorted(best.values())[: a.top]
-
-    else:
-        cache = load_cache()
-        best_free = {}
-        checked = set()
-        free_acronyms = set()
-        batch_size = 32
-
-        while True:
-            batch = generator_next(batch_size)
-
-            if not batch:
-                break
+            checks = 0
 
             for row in batch:
                 _syl, _extra, _cost, acr, _selections = row
 
-                # Different letter selections can produce the same acronym.
-                # Availability only needs to be checked once per acronym.
                 if acr in checked:
                     if acr in free_acronyms:
-                        add_best(best_free, row)
+                        add_best(best, row)
                     continue
 
                 checked.add(acr)
 
                 try:
-                    gh, py = check_free(acr, cache)
+                    gh, py, performed_check = check_free(acr, cache)
                 except KeyboardInterrupt:
                     save_cache(cache)
-                    raise KeyboardInterrupt
+                    raise
+
+                if performed_check:
+                    checks += 1
 
                 if gh == "free" and py == "free":
                     free_acronyms.add(acr)
-                    add_best(best_free, row)
+                    add_best(best, row)
 
             save_cache(cache)
-            print(f"One batch of {batch_size} down, cache saved")
 
-        rows = sorted(best_free.values())[: a.top]
+            if checks:
+                print(f"{checks} checks down, cache saved")
+
+    except KeyboardInterrupt:
+        if a.check:
+            save_cache(cache)
+        raise
+
+    rows = sorted(best.values())[: a.top]
 
     if not rows:
         print("no free candidates found" if a.check else "no candidates found")
         return 1
 
     print(f"top {len(rows)} ({'best free' if a.check else 'best'} first)\n")
-
     print(f"{'acronym':<12}{'syll':>5}{'extra':>7}{'dist':>6}  words")
 
     for syl, extra, cost, acr, selections in rows:
         source = format_selected_words(generator_words(), selections)
-
         print(f"{acr.upper():<12}{syl:>5}{extra:>7}{cost:>6}  {source}")
 
     return 0
