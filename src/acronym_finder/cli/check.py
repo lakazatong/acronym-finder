@@ -2,12 +2,9 @@
 """
 Check given acronyms against an availability provider.
 
-The provider name corresponds to a module under src/availability/.
-For example:
-    python check.py github ABC XYZ
-    python check.py pypi ABC XYZ
+Currently available providers are github and pypi.
 
-Results are cached independently for each provider under .cache/.
+Results are cached independently for each provider.
 Cached results are reused until they are expired with --ttl-days.
 
 A provider returns:
@@ -16,6 +13,13 @@ A provider returns:
     unknown      -> the provider could not determine the result
 
 Only successful availability checks are written to the cache.
+
+For GitHub, you can set the GITHUB_TOKEN env variable with a PAT (might require the read:user scope).
+This will increase the hourly request budget from 60 to 5000.
+
+Examples:
+    acronyms check github NASA IEEE
+    acronyms check pypi DEAD BEEF
 """
 
 import argparse

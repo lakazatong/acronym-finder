@@ -30,12 +30,12 @@ Expressions passed to --sort compare two results and must return a boolean.
         The comparator is contradictory and is invalid.
 
 Examples:
-    python view.py SESSION --sort "len(a.syllables)<len(b.syllables);len(a.acr)<len(b.acr)"
+    acronyms view <session> --sort "len(a.syllables)<len(b.syllables);len(a.acr)<len(b.acr)"
     -> sorts first by syllable count, then by acronym length.
 
-    python view.py SESSION --filter "len(a.syllables)<=3"
+    acronyms view <session> --filter "len(a.syllables)<=3"
 
-    python view.py SESSION \
+    acronyms view <session> \
         --filter "a.mask[0].count('1')==1" \
         --sort "a.mask[0]<b.mask[0];a.acr<b.acr" \
         --top 20
