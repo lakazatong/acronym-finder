@@ -23,10 +23,10 @@ Generation is resumable. Running the same request again continues from the
 previously saved generator state and appends new candidates to its session.
 
 Examples:
-    python acronym.py my awesome words
-    python acronym.py my awesome words --min 3 --max 5
-    python acronym.py m awesome words
-    python acronym.py m awesome w --max 4
+    acronyms generate my awesome words
+    acronyms generate my awesome words --min 3 --max 5
+    acronyms generate m awesome words
+    acronyms generate m awesome w --max 4
 """
 
 import argparse
@@ -44,35 +44,33 @@ from acronym_finder.session import (
 SAVE_INTERVAL = 1024
 
 
-def parse_words(
-    ap: argparse.ArgumentParser,
-    tokens: list[str],
-) -> list[str]:
+def parse_words(tokens: list[str]) -> list[str]:
     words = []
 
     for token in tokens:
         if not token.isascii() or not token.isalpha():
-            ap.error(f"invalid word '{token}': use only A-Z/a-z")
+            raise ValueError(f"invalid word '{token}': use only A-Z/a-z")
 
         words.append(token.lower())
 
     return words
 
 
-def parse_args() -> tuple[GenerationRequest, int]:
-    ap = argparse.ArgumentParser(
+def register_parser(subparsers):
+    parser = subparsers.add_parser(
+        "generate",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    ap.add_argument(
+    parser.add_argument(
         "words",
         nargs="+",
         metavar="WORD",
         help="a word",
     )
 
-    ap.add_argument(
+    parser.add_argument(
         "-n",
         "--count",
         type=int,
@@ -80,48 +78,64 @@ def parse_args() -> tuple[GenerationRequest, int]:
         help="number of new acronyms to generate (default: 10)",
     )
 
-    ap.add_argument(
+    parser.add_argument(
         "--min",
         type=int,
         default=None,
         help="minimum acronym length (default: number of words)",
     )
 
-    ap.add_argument(
+    parser.add_argument(
         "--max",
         type=int,
         default=None,
         help="maximum acronym length (default: --min)",
     )
 
-    a = ap.parse_args()
+    parser.set_defaults(func=main)
 
-    if a.count < 1:
-        ap.error("--count must be at least 1")
 
-    words = parse_words(ap, a.words)
+def main(args) -> int:
+    if args.count < 1:
+        print("--count must be at least 1", file=sys.stderr)
+        return 2
+
+    try:
+        words = parse_words(args.words)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
     n = len(words)
 
-    min_len = a.min if a.min is not None else n
-    max_len = a.max if a.max is not None else min_len
+    min_len = args.min if args.min is not None else n
+    max_len = args.max if args.max is not None else min_len
 
     if min_len < n:
-        ap.error(
-            f"--min must be at least {n} "
-            "because every word contributes at least one letter"
+        print(
+            f"error: --min must be at least {n} "
+            "because every word contributes at least one letter",
+            file=sys.stderr,
         )
+        return 2
 
     if max_len < min_len:
-        ap.error(f"--max ({max_len}) must be at least --min ({min_len})")
+        print(
+            f"error: --max ({max_len}) must be at least --min ({min_len})",
+            file=sys.stderr,
+        )
+        return 2
 
     cap_limit = max_len - n + 1
     caps = [min(len(word), cap_limit) for word in words]
 
     if min_len > sum(caps):
-        ap.error(
-            f"--min {min_len} is unreachable; "
-            f"the words allow at most {sum(caps)} letters"
+        print(
+            f"error: --min {min_len} is unreachable; "
+            f"the words allow at most {sum(caps)} letters",
+            file=sys.stderr,
         )
+        return 2
 
     request = GenerationRequest(
         words=words,
@@ -129,12 +143,6 @@ def parse_args() -> tuple[GenerationRequest, int]:
         min_len=min_len,
         max_len=max_len,
     )
-
-    return request, a.count
-
-
-def main() -> int:
-    request, count = parse_args()
 
     session_path = make_session_path(request)
 
@@ -158,6 +166,7 @@ def main() -> int:
             if not session.generator_stack:
                 print("Session's generator exhausted")
                 return 0
+
             generator.set_stack(session.generator_stack)
 
         generated = 0
@@ -165,7 +174,7 @@ def main() -> int:
 
         results_by_acronym = {result.acronym: result for result in session.results}
 
-        while generated < count:
+        while generated < args.count:
             acronym, mask = generator.next()
 
             result = results_by_acronym.get(acronym)
@@ -192,8 +201,6 @@ def main() -> int:
             if not generator.stack:
                 break
 
-        # Always persist the final state, including when we reached
-        # the requested number of unique acronyms.
         session.generator_stack = generator.get_stack()
         save_session(session_path, session)
 
@@ -211,7 +218,3 @@ def main() -> int:
             file=sys.stderr,
         )
         return 130
-
-
-if __name__ == "__main__":
-    sys.exit(main())

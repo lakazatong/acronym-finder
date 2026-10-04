@@ -67,15 +67,6 @@ class Result:
     syllables: list[str]
 
 
-@dataclass(frozen=True)
-class Arguments:
-    session: Session
-    filter: Callable[[Result], bool] | None
-    sort: list[Callable[[Result, Result], bool]]
-    top: int
-    unique: bool
-
-
 def syllables(word: str) -> list[str]:
     """Return the vowel groups used as syllable approximations."""
     vowels = set("aeiouy")
@@ -361,73 +352,6 @@ def print_results(
         print("  ".join(str(value).ljust(width) for value, width in zip(row, widths)))
 
 
-def parse_args() -> Arguments:
-    ap = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-
-    ap.add_argument(
-        "session",
-        type=Path,
-        help="session JSON file produced by acronym.py",
-    )
-
-    ap.add_argument(
-        "--filter",
-        dest="filter_expression",
-        default=None,
-        help="Python boolean expression applied to each result",
-    )
-
-    ap.add_argument(
-        "--sort",
-        dest="sort_expression",
-        default=None,
-        help="semicolon-separated Python comparison expressions",
-    )
-
-    ap.add_argument(
-        "--top",
-        type=int,
-        default=10,
-        metavar="N",
-        help="show only the first N results after filtering and sorting (default: 10)",
-    )
-
-    ap.add_argument(
-        "-u",
-        "--unique",
-        action="store_true",
-        help="keep only the first result for each acronym",
-    )
-
-    args = ap.parse_args()
-
-    if args.top < 1:
-        ap.error("--top must be at least 1")
-
-    try:
-        session = load_session(args.session)
-
-        if session is None:
-            raise FileNotFoundError(f"session not found: {args.session}")
-
-        filter_function = parse_filter(args.filter_expression)
-        sort_functions = parse_sort(args.sort_expression)
-
-    except (ValueError, TypeError, SyntaxError, FileNotFoundError) as e:
-        ap.error(str(e))
-
-    return Arguments(
-        session=session,
-        filter=filter_function,
-        sort=sort_functions,
-        top=args.top,
-        unique=args.unique,
-    )
-
-
 def unique_results(results: list[Result]) -> list[Result]:
     seen: set[str] = set()
     unique = []
@@ -442,37 +366,92 @@ def unique_results(results: list[Result]) -> list[Result]:
     return unique
 
 
-def main() -> int:
-    args = parse_args()
+def register_parser(subparsers):
+    parser = subparsers.add_parser(
+        "view",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
 
-    results = enrich_session(args.session)
+    parser.add_argument(
+        "session",
+        type=Path,
+        help="session JSON file produced by acronym.py",
+    )
 
-    if args.filter is not None:
-        results = [result for result in results if args.filter(result)]
+    parser.add_argument(
+        "--filter",
+        dest="filter_expression",
+        default=None,
+        help="Python boolean expression applied to each result",
+    )
 
-    results = sort_results(results, args.sort)
+    parser.add_argument(
+        "--sort",
+        dest="sort_expression",
+        default=None,
+        help="semicolon-separated Python comparison expressions",
+    )
+
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=10,
+        metavar="N",
+        help="show only the first N results after filtering and sorting (default: 10)",
+    )
+
+    parser.add_argument(
+        "-u",
+        "--unique",
+        action="store_true",
+        help="keep only the first result for each acronym",
+    )
+
+    parser.set_defaults(func=main)
+
+
+def main(args) -> int:
+    if args.top < 1:
+        print("--top must be at least 1", file=sys.stderr)
+        return 2
+
+    try:
+        session = load_session(args.session)
+
+        if session is None:
+            raise FileNotFoundError(f"session not found: {args.session}")
+
+        filter_function = parse_filter(args.filter_expression)
+        sort_functions = parse_sort(args.sort_expression)
+
+    except (ValueError, TypeError, SyntaxError, FileNotFoundError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+    results = enrich_session(session)
+
+    if filter_function is not None:
+        results = [result for result in results if filter_function(result)]
+
+    results = sort_results(results, sort_functions)
 
     if args.unique:
         results = unique_results(results)
 
-    if args.top is not None:
-        results = results[: args.top]
+    results = results[: args.top]
 
     print_metadata(
-        args.session,
+        session,
         len(results),
     )
 
-    mask_counts = {result.acronym: len(result.masks) for result in args.session.results}
+    mask_counts = {result.acronym: len(result.masks) for result in session.results}
 
     print_results(
         results,
-        args.session.request.words,
+        session.request.words,
         mask_counts if args.unique else None,
     )
 
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -3,10 +3,10 @@ from pathlib import Path
 
 from dataclasses_json import DataClassJsonMixin
 
-from .config import REPO_ROOT
+from .config import WORKING_DIR
 from .generator import GenerationRequest, GeneratorStack
 
-SESSION_DIR = REPO_ROOT / ".sessions"
+SESSION_DIR = WORKING_DIR / ".sessions"
 
 
 @dataclass

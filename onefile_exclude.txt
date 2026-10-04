@@ -1,9 +1,9 @@
 LICENSE
 github.txt
-*.toml
 *.lock
 .git*
 .venv
 .sessions
 **/__init__.py
 **/*.egg-info
+dist

@@ -19,11 +19,8 @@ Only successful availability checks are written to the cache.
 """
 
 import argparse
-import json
 import sys
-from dataclasses import dataclass
 from datetime import timedelta
-from types import ModuleType
 
 from acronym_finder.availability import get_provider
 from acronym_finder.cache import (
@@ -35,80 +32,47 @@ from acronym_finder.cache import (
 )
 
 
-@dataclass(frozen=True)
-class Arguments:
-    provider: ModuleType
-    acronyms: list[str]
-    ttl_days: float | None
-
-
-def load_candidates(path):
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            session = json.load(f)
-
-    except FileNotFoundError:
-        raise ValueError(f"file not found: {path}")
-
-    if not isinstance(session, dict):
-        raise TypeError(f"invalid session file: {path}")
-
-    results = session.get("results")
-
-    if not isinstance(results, list):
-        raise TypeError(f"'{path}' does not contain a valid results list")
-
-    if not all(isinstance(result, str) for result in results):
-        raise ValueError(f"results in '{path}' must all be strings")
-
-    return results
-
-
-def parse_args() -> Arguments:
-    ap = argparse.ArgumentParser(
+def register_parser(subparsers):
+    parser = subparsers.add_parser(
+        "check",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    ap.add_argument(
+    parser.add_argument(
         "provider",
         help="provider name; must match a file under src/availability",
     )
 
-    ap.add_argument(
+    parser.add_argument(
         "acronyms",
         nargs="+",
         metavar="ACRONYM",
         help="acronyms to check",
     )
 
-    ap.add_argument(
+    parser.add_argument(
         "--ttl-days",
         type=float,
-        default=None,
-        help="ignore cached checks older than this many days",
+        default=12 * 30,
+        help="ignore cached checks older than this many days (default: 1 year)",
     )
 
-    a = ap.parse_args()
+    parser.set_defaults(func=main)
 
-    if a.ttl_days is not None and a.ttl_days < 0:
-        ap.error("--ttl-days cannot be negative")
+
+def main(args):
+    if args.ttl_days is not None and args.ttl_days < 0:
+        print("--ttl-days cannot be negative", file=sys.stderr)
+        return 2
 
     try:
-        provider = get_provider(a.provider)
+        provider = get_provider(args.provider)
     except ValueError as e:
-        ap.error(str(e))
+        print(f"error: {e}", file=sys.stderr)
+        return 2
 
-    return Arguments(
-        provider=provider,
-        acronyms=a.acronyms,
-        ttl_days=a.ttl_days,
-    )
-
-
-def main():
-    args = parse_args()
-    provider_name = args.provider.__name__
+    provider_name = args.provider.lower()
 
     candidates = list(dict.fromkeys(name.lower() for name in args.acronyms))
 
@@ -149,7 +113,7 @@ def main():
 
                 continue
 
-            result = args.provider.check(name)
+            result = provider.check(name)
             checked_count += 1
 
             if result is None:
@@ -192,7 +156,3 @@ def main():
     )
 
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

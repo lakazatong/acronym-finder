@@ -9,5 +9,8 @@ description = "Generate pronounceable acronyms from a sequence of words."
 requires-python = ">=3.12"
 dependencies = ["dataclasses-json"]
 
+[project.scripts]
+acronyms = "acronym_finder.__main__:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -3,9 +3,9 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from .config import REPO_ROOT
+from .config import USER_CACHE_DIR
 
-CACHE_DIR = REPO_ROOT / ".cache"
+CACHE_DIR = USER_CACHE_DIR / "acronym-finder"
 CACHE_FIELDS = (
     "name",
     "available",
