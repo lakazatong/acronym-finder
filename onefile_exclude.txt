@@ -4,5 +4,6 @@ github.txt
 *.lock
 .git*
 .venv
+.sessions
 **/__init__.py
-**/*.egg-info/**
+**/*.egg-info
