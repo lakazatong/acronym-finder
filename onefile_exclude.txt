@@ -1,0 +1,8 @@
+LICENSE
+github.txt
+*.toml
+*.lock
+.git*
+.venv
+**/__init__.py
+**/*.egg-info/**

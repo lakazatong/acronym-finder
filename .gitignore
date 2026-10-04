@@ -1,6 +1,9 @@
 __pycache__
+*.egg-info
+
+.venv
+.sessions
 
 github.txt
-names.csv
 
-onefile_*.txt
+onefile_out.txt
