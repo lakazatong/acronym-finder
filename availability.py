@@ -147,7 +147,7 @@ def check_github(name):
 
             print(
                 f"GitHub rate limited; waiting {delay}s before the next "
-                f"GitHub request.",
+                "GitHub request.",
                 file=sys.stderr,
             )
 

@@ -33,9 +33,10 @@ Examples:
 
 import argparse
 import sys
+from datetime import timedelta
 
 from availability import check_free
-from cache import load_cache, save_cache
+from cache import load_cache, purge_cache, save_cache
 from generator import generator_init, generator_next, generator_words
 
 
@@ -118,6 +119,13 @@ def main():
     best = {}
 
     cache = load_cache() if a.check else None
+    ttl = timedelta(days=30 * 12)
+    purged_count = purge_cache(cache, ttl)
+    if purged_count > 0:
+        print(
+            f"Purged {purged_count} from the cache: either invalid (missing fields) or older than {ttl}"
+        )
+    save_cache(cache)
     checked = set()
     free_acronyms = set()
 
@@ -164,7 +172,7 @@ def main():
             save_cache(cache)
 
             if checks:
-                print(f"{checks} checks down, cache saved")
+                print(f"{checks} check{'s' if checks > 1 else ''} down, cache saved")
 
     except KeyboardInterrupt:
         if a.check:

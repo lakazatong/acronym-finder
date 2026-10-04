@@ -1,7 +1,44 @@
 import csv
+from datetime import datetime, timezone
 from pathlib import Path
 
 CACHE_FILE = Path(__file__).with_name("names.csv")
+
+
+def purge_cache(cache, ttl=None):
+    now = datetime.now(timezone.utc)
+    cutoff = now - ttl if ttl is not None else None
+
+    invalid = []
+
+    for name, data in cache.items():
+        if not isinstance(data["github"], bool):
+            invalid.append(name)
+            continue
+
+        if not isinstance(data["pypi"], bool):
+            invalid.append(name)
+            continue
+
+        if not data["github_checked_at"] or not data["pypi_checked_at"]:
+            invalid.append(name)
+            continue
+
+        if cutoff is not None:
+            github_checked_at = datetime.fromisoformat(
+                data["github_checked_at"].replace("Z", "+00:00")
+            )
+            pypi_checked_at = datetime.fromisoformat(
+                data["pypi_checked_at"].replace("Z", "+00:00")
+            )
+
+            if github_checked_at < cutoff or pypi_checked_at < cutoff:
+                invalid.append(name)
+
+    for name in invalid:
+        del cache[name]
+
+    return len(invalid)
 
 
 def load_cache():
